@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 
@@ -25,10 +24,17 @@ func (i *Image) Save(additionalNames ...string) error {
 }
 
 func (i *Image) SaveAs(name string, additionalNames ...string) error {
-	// during the first save attempt some layers may be excluded. The docker daemon allows this if the given set
-	// of layers already exists in the daemon in the given order
-	inspect, err := i.doSaveAs(name)
-	if err != nil {
+	var (
+		inspect types.ImageInspect
+		err     error
+	)
+	canOmitBaseLayers := !usesContainerdStorage(i.docker)
+	if canOmitBaseLayers {
+		// During the first save attempt some layers may be excluded.
+		// The docker daemon allows this if the given set of layers already exists in the daemon in the given order.
+		inspect, err = i.doSaveAs(name)
+	}
+	if !canOmitBaseLayers || err != nil {
 		// populate all layer paths and try again without the above performance optimization.
 		if err := i.downloadBaseLayersOnce(); err != nil {
 			return err
@@ -57,6 +63,21 @@ func (i *Image) SaveAs(name string, additionalNames ...string) error {
 	}
 
 	return nil
+}
+
+func usesContainerdStorage(docker DockerClient) bool {
+	info, err := docker.Info(context.Background())
+	if err != nil {
+		return false
+	}
+
+	for _, driverStatus := range info.DriverStatus {
+		if driverStatus[0] == "driver-type" && driverStatus[1] == "io.containerd.snapshotter.v1" {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (i *Image) doSaveAs(name string) (types.ImageInspect, error) {
@@ -95,58 +116,11 @@ func (i *Image) doSaveAs(name string) (types.ImageInspect, error) {
 	}()
 
 	tw := tar.NewWriter(pw)
+	_, err = i.addImageToTar(tw, repoName)
+	if err != nil {
+		return types.ImageInspect{}, err
+	}
 	defer tw.Close()
-
-	configFile, err := i.newConfigFile()
-	if err != nil {
-		return types.ImageInspect{}, errors.Wrap(err, "generating config file")
-	}
-
-	id := fmt.Sprintf("%x", sha256.Sum256(configFile))
-	if err := addTextToTar(tw, id+".json", configFile); err != nil {
-		return types.ImageInspect{}, err
-	}
-
-	var blankIdx int
-	var layerPaths []string
-	for _, path := range i.layerPaths {
-		if path == "" {
-			layerName := fmt.Sprintf("blank_%d", blankIdx)
-			blankIdx++
-			hdr := &tar.Header{Name: layerName, Mode: 0644, Size: 0}
-			if err := tw.WriteHeader(hdr); err != nil {
-				return types.ImageInspect{}, err
-			}
-			layerPaths = append(layerPaths, layerName)
-		} else {
-			layerName := fmt.Sprintf("/%x.tar", sha256.Sum256([]byte(path)))
-			f, err := os.Open(filepath.Clean(path))
-			if err != nil {
-				return types.ImageInspect{}, err
-			}
-			defer f.Close()
-			if err := addFileToTar(tw, layerName, f); err != nil {
-				return types.ImageInspect{}, err
-			}
-			f.Close()
-			layerPaths = append(layerPaths, layerName)
-		}
-	}
-
-	manifest, err := json.Marshal([]map[string]interface{}{
-		{
-			"Config":   id + ".json",
-			"RepoTags": []string{repoName},
-			"Layers":   layerPaths,
-		},
-	})
-	if err != nil {
-		return types.ImageInspect{}, err
-	}
-
-	if err := addTextToTar(tw, "manifest.json", manifest); err != nil {
-		return types.ImageInspect{}, err
-	}
 
 	tw.Close()
 	pw.Close()
@@ -155,7 +129,7 @@ func (i *Image) doSaveAs(name string) (types.ImageInspect, error) {
 		return types.ImageInspect{}, errors.Wrapf(err, "loading image %q. first error", i.repoName)
 	}
 
-	inspect, _, err := i.docker.ImageInspectWithRaw(context.Background(), id)
+	inspect, _, err := i.docker.ImageInspectWithRaw(context.Background(), i.repoName)
 	if err != nil {
 		if client.IsErrNotFound(err) {
 			return types.ImageInspect{}, errors.Wrapf(err, "saving image %q", i.repoName)
@@ -191,7 +165,7 @@ func (i *Image) downloadBaseLayers() error {
 	}
 	defer ensureReaderClosed(imageReader)
 
-	tmpDir, err := ioutil.TempDir("", "imgutil.local.image.")
+	tmpDir, err := os.MkdirTemp("", "imgutil.local.image.")
 	if err != nil {
 		return errors.Wrap(err, "failed to create temp dir")
 	}
@@ -248,6 +222,57 @@ func (i *Image) downloadBaseLayers() error {
 	return nil
 }
 
+func (i *Image) addImageToTar(tw *tar.Writer, repoName string) (string, error) {
+	configFile, err := i.newConfigFile()
+	if err != nil {
+		return "", errors.Wrap(err, "generating config file")
+	}
+
+	configHash := fmt.Sprintf("%x", sha256.Sum256(configFile))
+	if err := addTextToTar(tw, configHash+".json", configFile); err != nil {
+		return "", err
+	}
+
+	var blankIdx int
+	var layerPaths []string
+	for _, path := range i.layerPaths {
+		if path == "" {
+			layerName := fmt.Sprintf("blank_%d", blankIdx)
+			blankIdx++
+			hdr := &tar.Header{Name: layerName, Mode: 0644, Size: 0}
+			if err := tw.WriteHeader(hdr); err != nil {
+				return "", err
+			}
+			layerPaths = append(layerPaths, layerName)
+		} else {
+			layerName := fmt.Sprintf("/%x.tar", sha256.Sum256([]byte(path)))
+			f, err := os.Open(filepath.Clean(path))
+			if err != nil {
+				return "", err
+			}
+			defer f.Close()
+			if err := addFileToTar(tw, layerName, f); err != nil {
+				return "", err
+			}
+			f.Close()
+			layerPaths = append(layerPaths, layerName)
+		}
+	}
+
+	manifest, err := json.Marshal([]map[string]interface{}{
+		{
+			"Config":   configHash + ".json",
+			"RepoTags": []string{repoName},
+			"Layers":   layerPaths,
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return configHash, addTextToTar(tw, "manifest.json", manifest)
+}
+
 // helpers
 
 func checkResponseError(r io.Reader) error {
@@ -265,7 +290,7 @@ func checkResponseError(r io.Reader) error {
 
 // ensureReaderClosed drains and closes and reader, returning the first error
 func ensureReaderClosed(r io.ReadCloser) error {
-	_, err := io.Copy(ioutil.Discard, r)
+	_, err := io.Copy(io.Discard, r)
 	if closeErr := r.Close(); closeErr != nil && err == nil {
 		err = closeErr
 	}

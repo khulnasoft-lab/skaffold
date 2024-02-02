@@ -41,6 +41,7 @@ type DockerClient interface {
 	ImageSave(ctx context.Context, images []string) (io.ReadCloser, error)
 	ImageTag(ctx context.Context, image, ref string) error
 	Info(ctx context.Context) (types.Info, error)
+	ServerVersion(ctx context.Context) (types.Version, error)
 }
 
 // getters
@@ -114,6 +115,10 @@ func (i *Image) Identifier() (imgutil.Identifier, error) {
 	}, nil
 }
 
+func (i *Image) Kind() string {
+	return `local`
+}
+
 func (i *Image) Label(key string) (string, error) {
 	labels := i.inspect.Config.Labels
 	return labels[key], nil
@@ -152,6 +157,10 @@ func (i *Image) TopLayer() (string, error) {
 
 	topLayer := all[len(all)-1]
 	return topLayer, nil
+}
+
+func (i *Image) UnderlyingImage() v1.Image {
+	return nil
 }
 
 func (i *Image) Variant() (string, error) {

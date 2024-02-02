@@ -1,9 +1,9 @@
 package remote
 
 import (
-	"crypto/tls"
 	"io"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 
@@ -94,7 +94,7 @@ func NewImage(repoName string, keychain authn.Keychain, ops ...ImageOption) (*Im
 func defaultPlatform() imgutil.Platform {
 	return imgutil.Platform{
 		OS:           "linux",
-		Architecture: "amd64",
+		Architecture: runtime.GOARCH,
 	}
 }
 
@@ -146,7 +146,7 @@ func prepareNewWindowsImage(ri *Image) error {
 func processPreviousImageOption(ri *Image, prevImageRepoName string, platform imgutil.Platform) error {
 	reg := getRegistry(prevImageRepoName, ri.registrySettings)
 
-	prevImage, err := NewV1Image(prevImageRepoName, ri.keychain, WithV1DefaultPlatform(platform), WithV1RegistrySetting(reg.insecure, reg.insecureSkipVerify))
+	prevImage, err := NewV1Image(prevImageRepoName, ri.keychain, WithV1DefaultPlatform(platform), WithV1RegistrySetting(reg.insecure))
 	if err != nil {
 		return err
 	}
@@ -218,22 +218,14 @@ func newV1Image(keychain authn.Keychain, repoName string, platform imgutil.Platf
 		OSVersion:    platform.OSVersion,
 	}
 
-	opts := []remote.Option{remote.WithAuth(auth), remote.WithPlatform(v1Platform)}
-	// #nosec G402
-	if reg.insecureSkipVerify {
-		opts = append(opts, remote.WithTransport(&http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		}))
-	} else {
-		opts = append(opts, remote.WithTransport(http.DefaultTransport))
-	}
-
 	var image v1.Image
 	for i := 0; i <= maxRetries; i++ {
 		time.Sleep(100 * time.Duration(i) * time.Millisecond) // wait if retrying
-		image, err = remote.Image(ref, opts...)
+		image, err = remote.Image(ref,
+			remote.WithAuth(auth),
+			remote.WithPlatform(v1Platform),
+			remote.WithTransport(getTransport(reg.insecure)),
+		)
 		if err != nil {
 			if err == io.EOF && i != maxRetries {
 				continue // retry if EOF
@@ -276,7 +268,7 @@ func referenceForRepoName(keychain authn.Keychain, ref string, insecure bool) (n
 func processBaseImageOption(ri *Image, baseImageRepoName string, platform imgutil.Platform) error {
 	reg := getRegistry(baseImageRepoName, ri.registrySettings)
 	var err error
-	ri.image, err = NewV1Image(baseImageRepoName, ri.keychain, WithV1DefaultPlatform(platform), WithV1RegistrySetting(reg.insecure, reg.insecureSkipVerify))
+	ri.image, err = NewV1Image(baseImageRepoName, ri.keychain, WithV1DefaultPlatform(platform), WithV1RegistrySetting(reg.insecure))
 	if err != nil {
 		return err
 	}

@@ -37,8 +37,7 @@ type Image struct {
 }
 
 type registrySetting struct {
-	insecure           bool
-	insecureSkipVerify bool
+	insecure bool
 }
 
 // getters
@@ -105,7 +104,7 @@ func (i *Image) found() (*v1.Descriptor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return remote.Head(ref, remote.WithAuth(auth), remote.WithTransport(http.DefaultTransport))
+	return remote.Head(ref, remote.WithAuth(auth), remote.WithTransport(getTransport(reg.insecure)))
 }
 
 func (i *Image) Valid() bool {
@@ -118,7 +117,7 @@ func (i *Image) valid() error {
 	if err != nil {
 		return err
 	}
-	desc, err := remote.Get(ref, remote.WithAuth(auth), remote.WithTransport(http.DefaultTransport))
+	desc, err := remote.Get(ref, remote.WithAuth(auth), remote.WithTransport(getTransport(reg.insecure)))
 	if err != nil {
 		return err
 	}
@@ -183,6 +182,10 @@ func (i *Image) Identifier() (imgutil.Identifier, error) {
 	return DigestIdentifier{
 		Digest: digestRef,
 	}, nil
+}
+
+func (i *Image) Kind() string {
+	return `remote`
 }
 
 func (i *Image) Label(key string) (string, error) {
@@ -455,7 +458,7 @@ func (i *Image) Delete() error {
 	if err != nil {
 		return err
 	}
-	return remote.Delete(ref, remote.WithAuth(auth))
+	return remote.Delete(ref, remote.WithAuth(auth), remote.WithTransport(getTransport(reg.insecure)))
 }
 
 func (i *Image) Rebase(baseTopLayer string, newBase imgutil.Image) error {
