@@ -1,6 +1,8 @@
 module github.com/GoogleContainerTools/skaffold/v2
 
-go 1.20
+go 1.21
+
+toolchain go1.22.1
 
 // these require code change may remove these later
 exclude (
@@ -27,14 +29,14 @@ require (
 	github.com/ahmetb/dlog v0.0.0-20170105205344-4fb5f8204f26
 	github.com/blang/semver v3.5.1+incompatible
 	github.com/bmatcuk/doublestar v1.3.4
-	github.com/buildpacks/imgutil v0.0.0-20230626185301-726f02e4225c
+	github.com/buildpacks/imgutil v0.0.0-20240206215312-f8d38e1de03d
 	github.com/buildpacks/lifecycle v0.17.0
 	github.com/buildpacks/pack v0.30.0
 	github.com/cenkalti/backoff/v4 v4.2.0
 	github.com/containerd/containerd v1.7.2
 	github.com/docker/cli v24.0.5+incompatible
 	github.com/docker/distribution v2.8.2+incompatible
-	github.com/docker/docker v24.0.5+incompatible
+	github.com/docker/docker v24.0.7+incompatible
 	github.com/docker/go-connections v0.4.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/evanphx/json-patch v4.12.0+incompatible
@@ -44,7 +46,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da
 	github.com/golang/protobuf v1.5.3
 	github.com/google/go-cmp v0.6.0
-	github.com/google/go-containerregistry v0.16.1
+	github.com/google/go-containerregistry v0.19.0
 	github.com/google/go-github v17.0.0+incompatible
 	github.com/google/ko v0.14.0
 	github.com/google/uuid v1.3.0
@@ -90,7 +92,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.15.0
 	golang.org/x/crypto v0.17.0
 	golang.org/x/oauth2 v0.11.0
-	golang.org/x/sync v0.3.0
+	golang.org/x/sync v0.6.0
 	golang.org/x/sys v0.15.0
 	golang.org/x/term v0.15.0
 	golang.org/x/tools v0.13.0
